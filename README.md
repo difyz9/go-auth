@@ -16,7 +16,7 @@ GoAuth 是一个轻量级、易于集成的 Go API 认证中间件，专为 Gin 
 ## 安装
 
 ```bash
-go get github.com/yourusername/payment_service/pkg/goauth
+go get github.com/difyz9/go-auth
 ```
 
 ## 快速开始
