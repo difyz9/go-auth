@@ -60,7 +60,7 @@ package main
 
 import (
     "github.com/gin-gonic/gin"
-    "github.com/yourusername/payment_service/pkg/goauth"
+    "github.com/difyz9/go-auth"
 )
 
 func main() {
@@ -118,7 +118,7 @@ import (
     "strconv"
     "time"
     
-    "github.com/yourusername/payment_service/pkg/goauth"
+    "github.com/difyz9/go-auth"
 )
 
 func main() {
