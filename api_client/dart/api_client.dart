@@ -1,8 +1,10 @@
 import 'dart:convert';
 import 'dart:math';
+import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:crypto/crypto.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:encrypt/encrypt.dart' as encrypt;
 
 /// API客户端配置
 class ApiConfig {
@@ -10,12 +12,16 @@ class ApiConfig {
   final String appSecret;
   final String? baseURL;
   final int? timeout;
+  final String? aesKey;  // 可选的AES密钥（用于加解密）
+  final bool? enableEncryption;  // 是否启用加解密
 
   const ApiConfig({
     required this.appId,
     required this.appSecret,
     this.baseURL,
     this.timeout,
+    this.aesKey,
+    this.enableEncryption,
   });
 }
 
@@ -49,6 +55,45 @@ class ApiResponse<T> {
       code: json['code'] ?? 0,
       message: json['message'] ?? '',
       data: data,
+    );
+  }
+}
+
+/// 加密请求结构
+class EncryptedRequest {
+  final String data;
+  final int timestamp;
+
+  const EncryptedRequest({
+    required this.data,
+    required this.timestamp,
+  });
+
+  Map<String, dynamic> toJson() {
+    return {
+      'data': data,
+      'timestamp': timestamp,
+    };
+  }
+}
+
+/// 加密响应结构
+class EncryptedResponse {
+  final bool encrypted;
+  final String data;
+  final int timestamp;
+
+  const EncryptedResponse({
+    required this.encrypted,
+    required this.data,
+    required this.timestamp,
+  });
+
+  factory EncryptedResponse.fromJson(Map<String, dynamic> json) {
+    return EncryptedResponse(
+      encrypted: json['encrypted'] ?? false,
+      data: json['data'] ?? '',
+      timestamp: json['timestamp'] ?? 0,
     );
   }
 }
@@ -96,6 +141,69 @@ class ApiClient {
 
     // 初始化SharedPreferences
     _initPreferences();
+  }
+
+  /// 检查是否启用加密
+  bool get _encryptionEnabled => _config.enableEncryption ?? false;
+
+  /// 获取AES密钥
+  String get _aesKey => _config.aesKey ?? '';
+
+  /// AES加密
+  String? _aesEncrypt(String plaintext) {
+    if (_aesKey.isEmpty) return null;
+    
+    try {
+      final key = encrypt.Key.fromUtf8(_normalizeKey(_aesKey));
+      final iv = encrypt.IV.fromSecureRandom(16);
+      final encrypter = encrypt.Encrypter(encrypt.AES(key, mode: encrypt.AESMode.cbc));
+      
+      final encrypted = encrypter.encrypt(plaintext, iv: iv);
+      
+      // 将IV和密文合并
+      final combined = Uint8List.fromList([...iv.bytes, ...encrypted.bytes]);
+      return base64.encode(combined);
+    } catch (e) {
+      print('❌ AES加密失败: $e');
+      return null;
+    }
+  }
+
+  /// AES解密
+  String? _aesDecrypt(String ciphertext) {
+    if (_aesKey.isEmpty) return null;
+    
+    try {
+      final combined = base64.decode(ciphertext);
+      if (combined.length < 16) {
+        throw Exception('密文长度太短');
+      }
+      
+      final iv = encrypt.IV(Uint8List.fromList(combined.sublist(0, 16)));
+      final encrypted = encrypt.Encrypted(Uint8List.fromList(combined.sublist(16)));
+      
+      final key = encrypt.Key.fromUtf8(_normalizeKey(_aesKey));
+      final encrypter = encrypt.Encrypter(encrypt.AES(key, mode: encrypt.AESMode.cbc));
+      
+      return encrypter.decrypt(encrypted, iv: iv);
+    } catch (e) {
+      print('❌ AES解密失败: $e');
+      return null;
+    }
+  }
+
+  /// 标准化AES密钥长度（16/24/32字节）
+  String _normalizeKey(String key) {
+    final bytes = utf8.encode(key);
+    if (bytes.length >= 32) {
+      return key.substring(0, 32);
+    } else if (bytes.length >= 24) {
+      return key.substring(0, 24);
+    } else if (bytes.length >= 16) {
+      return key.substring(0, 16);
+    } else {
+      return key.padRight(16, '0');
+    }
   }
 
   /// 初始化SharedPreferences
@@ -273,16 +381,45 @@ class ApiClient {
     dynamic requestData,
     RequestConfig? config,
     T Function(dynamic)? fromJson,
+    bool? encrypt,  // 是否加密请求
+    bool? requestEncrypted,  // 是否请求加密响应
   }) async {
     try {
       // 准备请求体
       String? body;
+      dynamic finalRequestData = requestData;
+      
       if (requestData != null && method != 'GET') {
-        body = jsonEncode(requestData);
+        // 检查是否需要加密请求
+        final shouldEncrypt = encrypt ?? _encryptionEnabled;
+        
+        if (shouldEncrypt && _aesKey.isNotEmpty) {
+          final plaintext = jsonEncode(requestData);
+          final encrypted = _aesEncrypt(plaintext);
+          
+          if (encrypted != null) {
+            final encryptedRequest = EncryptedRequest(
+              data: encrypted,
+              timestamp: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+            );
+            finalRequestData = encryptedRequest.toJson();
+            print('🔐 请求已加密');
+          }
+        }
+        
+        body = jsonEncode(finalRequestData);
       }
 
       // 构建请求头
       final headers = await _buildHeaders(url, config, body);
+      
+      // 添加加密相关的请求头
+      if (encrypt == true || _encryptionEnabled) {
+        headers['X-Encrypted'] = '1';
+      }
+      if (requestEncrypted == true) {
+        headers['X-Response-Encrypt'] = '1';
+      }
 
       // 构建请求选项
       final options = Options(
@@ -308,7 +445,49 @@ class ApiClient {
         );
       }
 
-      // 检查业务状态码
+      // 检查是否是加密响应
+      if (responseData['encrypted'] == true && responseData['data'] is String) {
+        print('🔓 收到加密响应，正在解密...');
+        final encryptedResp = EncryptedResponse.fromJson(responseData);
+        final decrypted = _aesDecrypt(encryptedResp.data);
+        
+        if (decrypted == null) {
+          throw DioException(
+            requestOptions: response.requestOptions,
+            message: '响应解密失败',
+          );
+        }
+        
+        // 解析解密后的JSON
+        final decryptedData = jsonDecode(decrypted);
+        print('✅ 响应解密成功');
+        
+        // 如果解密后的数据也包含标准响应格式，继续处理
+        if (decryptedData is Map && decryptedData.containsKey('code')) {
+          final code = decryptedData['code'] as int? ?? 0;
+          final message = decryptedData['message'] as String? ?? '';
+          final data = decryptedData['data'];
+          
+          if (code != 200) {
+            throw DioException(
+              requestOptions: response.requestOptions,
+              message: message.isNotEmpty ? message : 'Error code: $code',
+              response: response,
+            );
+          }
+          
+          if (fromJson != null && data != null) {
+            return fromJson(data);
+          } else if (data != null) {
+            return data as T;
+          }
+        }
+        
+        // 直接返回解密后的数据
+        return decryptedData as T;
+      }
+
+      // 处理未加密的响应
       final code = responseData['code'] as int? ?? 0;
       final message = responseData['message'] as String? ?? '';
       final data = responseData['data'];
@@ -349,12 +528,14 @@ class ApiClient {
     String url, {
     Map<String, dynamic>? params,
     T Function(dynamic)? fromJson,
+    bool? requestEncrypted,  // 是否请求加密响应
   }) {
     return _request<T>(
       url,
       'GET',
       config: RequestConfig(params: params),
       fromJson: fromJson,
+      requestEncrypted: requestEncrypted,
     );
   }
 
@@ -363,12 +544,16 @@ class ApiClient {
     String url, {
     dynamic data,
     T Function(dynamic)? fromJson,
+    bool? encrypt,  // 是否加密请求
+    bool? requestEncrypted,  // 是否请求加密响应
   }) {
     return _request<T>(
       url,
       'POST',
       requestData: data,
       fromJson: fromJson,
+      encrypt: encrypt,
+      requestEncrypted: requestEncrypted,
     );
   }
 
@@ -443,6 +628,8 @@ class ApiClient {
 const defaultConfig = ApiConfig(
   appId: 'test-app-001',
   appSecret: 'tmcf5m6qcm6k9hrp3sy8rhgafu00ttph',
+  aesKey: null,  // 可选：添加AES密钥以启用加解密
+  enableEncryption: false,  // 默认不启用加密
 );
 
 /// 默认API客户端实例
@@ -451,4 +638,20 @@ final apiClient = ApiClient(defaultConfig);
 /// 创建自定义API客户端
 ApiClient createApiClient(ApiConfig config) {
   return ApiClient(config);
+}
+
+/// 创建启用加密的API客户端
+ApiClient createEncryptedApiClient({
+  required String appId,
+  required String appSecret,
+  required String aesKey,
+  String? baseURL,
+}) {
+  return ApiClient(ApiConfig(
+    appId: appId,
+    appSecret: appSecret,
+    aesKey: aesKey,
+    baseURL: baseURL,
+    enableEncryption: true,
+  ));
 }
