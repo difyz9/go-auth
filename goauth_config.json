@@ -1,0 +1,35 @@
+{
+  "timestamp_tolerance": 300,
+  "default_rate_limit": 1000,
+  "enable_ip_check": true,
+  "apps": {
+    "test-app-001": {
+      "app_id": "test-app-001",
+      "app_secret": "test-secret-key-12345678",
+      "app_name": "测试应用",
+      "require_sign": true,
+      "enabled": true,
+      "rate_limit": 100,
+      "ip_whitelist": ["*"],
+      "allowed_routes": ["/api/*", "/public/*"]
+    },
+    "production-app": {
+      "app_id": "prod-app-001",
+      "app_secret": "prod-secret-key-change-me",
+      "app_name": "生产应用",
+      "require_sign": true,
+      "enabled": true,
+      "rate_limit": 1000,
+      "ip_whitelist": ["192.168.1.*", "10.0.0.1"]
+    },
+    "internal-app": {
+      "app_id": "internal-app-001",
+      "app_secret": "internal-secret-key",
+      "app_name": "内部应用",
+      "require_sign": false,
+      "enabled": true,
+      "rate_limit": 5000,
+      "ip_whitelist": ["127.0.0.1", "::1", "localhost"]
+    }
+  }
+}

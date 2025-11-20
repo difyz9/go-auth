@@ -1,0 +1,102 @@
+package goauth
+
+import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// GenerateSign 生成API签名
+// 签名算法：HMAC-SHA256
+// 签名步骤：
+// 1. 将所有参数（除sign外）按参数名ASCII码从小到大排序
+// 2. 使用URL键值对的格式（即key1=value1&key2=value2…）拼接成字符串
+// 3. 使用应用的AppSecret对上述字符串进行HMAC-SHA256签名
+func GenerateSign(params map[string]string, appSecret string) string {
+	// 创建参数副本，避免修改原始map
+	paramsCopy := make(map[string]string)
+	for k, v := range params {
+		if k != "sign" && v != "" { // 过滤掉空值和sign参数
+			paramsCopy[k] = v
+		}
+	}
+
+	// 参数排序
+	var keys []string
+	for k := range paramsCopy {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	// 拼接字符串 - 不进行URL编码，保持原始值
+	var parts []string
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("%s=%s", k, paramsCopy[k]))
+	}
+	signString := strings.Join(parts, "&")
+
+	// HMAC-SHA256签名
+	h := hmac.New(sha256.New, []byte(appSecret))
+	h.Write([]byte(signString))
+	return hex.EncodeToString(h.Sum(nil)) // 返回小写十六进制
+}
+
+// VerifySign 验证API签名
+func VerifySign(params map[string]string, appSecret string, receivedSign string) bool {
+	expectedSign := GenerateSign(params, appSecret)
+	// 支持大小写不敏感的比较
+	return strings.EqualFold(expectedSign, receivedSign)
+}
+
+// ValidateTimestamp 验证时间戳
+func ValidateTimestamp(timestamp string, tolerance int64) bool {
+	ts, err := strconv.ParseInt(timestamp, 10, 64)
+	if err != nil {
+		return false
+	}
+
+	now := time.Now().Unix()
+	diff := now - ts
+	if diff < 0 {
+		diff = -diff
+	}
+	
+	return diff <= tolerance
+}
+
+// GenerateNonce 生成随机字符串
+func GenerateNonce(length int) string {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	b := make([]byte, length)
+	for i := range b {
+		b[i] = charset[time.Now().UnixNano()%int64(len(charset))]
+	}
+	return string(b)
+}
+
+// SignatureExample 生成API签名示例
+func SignatureExample(appID, appSecret string, additionalParams map[string]string) map[string]string {
+	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
+	nonce := GenerateNonce(16)
+
+	params := map[string]string{
+		"appId":     appID,
+		"timestamp": timestamp,
+		"nonce":     nonce,
+	}
+
+	// 添加额外参数
+	for k, v := range additionalParams {
+		params[k] = v
+	}
+
+	sign := GenerateSign(params, appSecret)
+	params["sign"] = sign
+
+	return params
+}

@@ -1,0 +1,70 @@
+# GoAuth 配置文件示例
+
+# 全局配置
+timestamp_tolerance: 300  # 时间戳容差（秒），默认5分钟
+default_rate_limit: 1000  # 默认速率限制（次/分钟）
+enable_ip_check: true     # 是否启用IP白名单检查
+
+# 应用配置
+apps:
+  # 测试应用
+  test-app-001:
+    app_id: test-app-001
+    app_secret: test-secret-key-12345678
+    app_name: 测试应用
+    require_sign: true      # 是否需要签名验证
+    enabled: true           # 是否启用
+    rate_limit: 100         # 速率限制（次/分钟）
+    ip_whitelist:           # IP白名单
+      - "*"                 # 允许所有IP（仅用于测试）
+    allowed_routes:         # 允许访问的路由（可选）
+      - "/api/*"
+      - "/public/*"
+
+  # 生产应用
+  production-app:
+    app_id: prod-app-001
+    app_secret: prod-secret-key-change-me-in-production
+    app_name: 生产应用
+    require_sign: true
+    enabled: true
+    rate_limit: 1000
+    ip_whitelist:
+      - "192.168.1.*"       # 允许 192.168.1.x 网段
+      - "10.0.0.1"          # 允许特定IP
+      - "172.16.0.0/16"     # 允许 CIDR 格式（需要实现）
+
+  # 无需签名的应用（用于内部调用）
+  internal-app:
+    app_id: internal-app-001
+    app_secret: internal-secret-key
+    app_name: 内部应用
+    require_sign: false     # 不需要签名验证
+    enabled: true
+    rate_limit: 5000
+    ip_whitelist:
+      - "127.0.0.1"
+      - "::1"
+      - "localhost"
+
+  # 禁用的应用
+  disabled-app:
+    app_id: old-app-001
+    app_secret: old-secret-key
+    app_name: 已禁用应用
+    require_sign: true
+    enabled: false          # 已禁用，无法访问
+    rate_limit: 100
+    ip_whitelist:
+      - "*"
+
+  # 高频调用应用
+  high-frequency-app:
+    app_id: hf-app-001
+    app_secret: hf-secret-key-12345678
+    app_name: 高频应用
+    require_sign: true
+    enabled: true
+    rate_limit: 10000       # 更高的速率限制
+    ip_whitelist:
+      - "192.168.*.*"       # 允许整个内网
