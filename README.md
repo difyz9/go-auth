@@ -11,8 +11,9 @@ GoAuth 是一个轻量级、易于集成的 Go API 认证中间件，专为 Gin 
 - ✅ **IP 白名单** - 支持通配符匹配
 - ✅ **速率限制** - 内置请求频率限制
 - ✅ **时间戳验证** - 防重放攻击
-- ✅ **请求体加解密** - 支持 AES 加密传输（新增）
-- ✅ **响应体加密** - 可选的响应数据加密（新增）
+- ✅ **POST签名优化** - 可配置是否包含请求体（v0.0.3新增）🆕
+- ✅ **请求体加解密** - 支持 AES 加密传输
+- ✅ **响应体加密** - 可选的响应数据加密
 - ✅ **可扩展** - 支持自定义日志和错误处理
 
 ## 安装
@@ -515,17 +516,47 @@ decryptedData, err := goauth.AESDecrypt(key, encryptedData)
 4. **HMAC-SHA256**：使用 `appSecret` 作为密钥
 5. **十六进制编码**：将结果转换为小写十六进制字符串
 
+### POST请求签名优化 🆕
+
+**v0.0.3 新增**：可配置POST请求签名是否包含请求体
+
+```yaml
+# 全局配置（推荐：默认不包含请求体）
+sign_include_body: false
+
+apps:
+  # 普通应用（使用全局配置）
+  normal-app:
+    app_secret: "secret1"
+    
+  # 高安全应用（覆盖全局配置）
+  secure-app:
+    app_secret: "secret2"
+    sign_include_body: true  # 包含请求体
+```
+
+**客户端配置**：
+```go
+// 默认方式（不包含请求体，推荐）
+client := goauth.NewClient(baseURL, appID, appSecret)
+
+// 高安全方式（包含请求体）
+client := goauth.NewClient(baseURL, appID, appSecret,
+    goauth.WithSignIncludeBody(true))
+```
+
+**详细说明**：参见 [POST_SIGN_QUICK_GUIDE.md](./POST_SIGN_QUICK_GUIDE.md)
+
 ### 示例
 
 ```
-参数：
+参数（不包含请求体，推荐）：
   appId: test-app-001
   timestamp: 1700000000
   nonce: abc123
-  amount: 100.00
 
 排序后拼接：
-  amount=100.00&appId=test-app-001&nonce=abc123&timestamp=1700000000
+  appId=test-app-001&nonce=abc123&timestamp=1700000000
 
 HMAC-SHA256(上述字符串, appSecret)
 => 签名结果
@@ -565,6 +596,21 @@ HMAC-SHA256(上述字符串, appSecret)
 
 A: 将应用配置中的 `require_sign` 设置为 `false`。
 
+### Q: POST请求出现401错误怎么办？ 🆕
+
+A: 从 v0.0.3 开始，默认签名不包含请求体。确保：
+```yaml
+# 服务端配置
+sign_include_body: false  # 推荐配置
+```
+```go
+// 客户端配置
+client := goauth.NewClient(baseURL, appID, appSecret)
+// 默认 SignIncludeBody = false
+```
+
+详见：[POST签名优化指南](./POST_SIGN_QUICK_GUIDE.md)
+
 ### Q: 支持哪些 IP 白名单格式？
 
 A: 支持：
@@ -580,7 +626,8 @@ A:
 2. 确认参数排序是否正确
 3. 验证拼接字符串格式
 4. 确保 `appSecret` 正确
-5. 使用提供的 `SignatureExample` 函数生成测试签名
+5. 启用客户端调试模式：`goauth.WithDebug(true)`
+6. 使用 `client.DebugSign(body)` 查看签名过程
 
 ## 完整示例
 

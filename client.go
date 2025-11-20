@@ -12,11 +12,12 @@ import (
 
 // Client API认证客户端
 type Client struct {
-	BaseURL    string
-	AppID      string
-	AppSecret  string
-	HTTPClient *http.Client
-	Debug      bool // 调试模式
+	BaseURL         string
+	AppID           string
+	AppSecret       string
+	HTTPClient      *http.Client
+	Debug           bool // 调试模式
+	SignIncludeBody bool // 签名是否包含请求体（默认false，推荐）
 }
 
 // ClientOption 客户端配置选项
@@ -36,6 +37,13 @@ func WithDebug(debug bool) ClientOption {
 	}
 }
 
+// WithSignIncludeBody 设置签名是否包含请求体
+func WithSignIncludeBody(include bool) ClientOption {
+	return func(c *Client) {
+		c.SignIncludeBody = include
+	}
+}
+
 // WithHTTPClient 自定义HTTP客户端
 func WithHTTPClient(httpClient *http.Client) ClientOption {
 	return func(c *Client) {
@@ -52,7 +60,8 @@ func NewClient(baseURL, appID, appSecret string, opts ...ClientOption) *Client {
 		HTTPClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
-		Debug: false,
+		Debug:           false,
+		SignIncludeBody: false, // 默认不包含请求体（推荐，更灵活）
 	}
 	
 	// 应用选项
@@ -87,8 +96,8 @@ func (c *Client) Request(method, path string, body interface{}, headers ...map[s
 		"nonce":     nonce,
 	}
 	
-	// 如果有请求体，加入签名
-	if len(bodyBytes) > 0 {
+	// 根据配置决定是否将请求体加入签名
+	if c.SignIncludeBody && len(bodyBytes) > 0 {
 		params["requestBody"] = string(bodyBytes)
 	}
 	
@@ -101,6 +110,7 @@ func (c *Client) Request(method, path string, body interface{}, headers ...map[s
 		fmt.Printf("[GoAuth Client] AppID: %s\n", c.AppID)
 		fmt.Printf("[GoAuth Client] Timestamp: %s\n", timestamp)
 		fmt.Printf("[GoAuth Client] Nonce: %s\n", nonce)
+		fmt.Printf("[GoAuth Client] SignIncludeBody: %v\n", c.SignIncludeBody)
 		fmt.Printf("[GoAuth Client] Sign: %s\n", sign)
 		if len(bodyBytes) > 0 {
 			fmt.Printf("[GoAuth Client] Body: %s\n", string(bodyBytes))
@@ -225,7 +235,7 @@ func (c *Client) DebugSign(body interface{}) {
 		"nonce":     nonce,
 	}
 	
-	if body != nil {
+	if c.SignIncludeBody && body != nil {
 		bodyBytes, _ := json.Marshal(body)
 		if len(bodyBytes) > 0 {
 			params["requestBody"] = string(bodyBytes)

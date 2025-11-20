@@ -1,0 +1,51 @@
+# Go-Auth 配置示例（优化后的POST签名配置）
+
+# 全局配置：默认不在签名中包含请求体（推荐）
+sign_include_body: false  # false = 更灵活简单，true = 更安全但复杂
+
+# 应用配置
+apps:
+  # 示例1：普通应用（使用全局配置，不包含请求体）
+  test-app-001:
+    app_secret: "tmcf5m6qcm6k9hrp3sy8rhgafu00ttph"
+    app_name: "测试应用"
+    enabled: true
+    require_sign: true
+    # 不设置 sign_include_body，使用全局配置 (false)
+    ip_whitelist:
+      - "*"
+    rate_limit: 1000
+    allowed_routes:
+      - "/api/*"
+
+  # 示例2：高安全应用（覆盖全局配置，包含请求体）
+  secure-app-002:
+    app_secret: "another-secret-key-here"
+    app_name: "高安全应用"
+    enabled: true
+    require_sign: true
+    sign_include_body: true  # 覆盖全局配置，启用请求体签名
+    ip_whitelist:
+      - "192.168.1.0/24"
+    rate_limit: 100
+    allowed_routes:
+      - "/api/payment/*"
+      - "/api/sensitive/*"
+
+  # 示例3：明确禁用签名验证的应用
+  public-app-003:
+    app_secret: "public-secret"
+    app_name: "公开应用"
+    enabled: true
+    require_sign: false  # 不需要签名
+    rate_limit: 5000
+
+# 其他全局配置
+timestamp_tolerance: 300  # 时间戳容差（秒）
+default_rate_limit: 1000  # 默认速率限制
+enable_ip_check: true     # 启用IP检查
+
+# 加密配置（可选）
+# crypto:
+#   enabled: false
+#   aes_key: "your-32-byte-aes-key-here!!!"

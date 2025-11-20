@@ -106,15 +106,22 @@ func SignatureExample(appID, appSecret string, additionalParams map[string]strin
 var timeNow = time.Now
 
 // BuildSignParams 构建签名参数（便捷方法）
-func BuildSignParams(appID string, body interface{}) (map[string]string, error) {
+// includeBody: 是否将请求体包含在签名中（默认false，推荐）
+func BuildSignParams(appID string, body interface{}, includeBody ...bool) (map[string]string, error) {
 	params := map[string]string{
 		"appId":     appID,
 		"timestamp": strconv.FormatInt(timeNow().Unix(), 10),
 		"nonce":     GenerateNonce(16),
 	}
 	
-	// 如果有请求体，序列化并加入参数
-	if body != nil {
+	// 确定是否包含请求体
+	shouldInclude := false
+	if len(includeBody) > 0 {
+		shouldInclude = includeBody[0]
+	}
+	
+	// 如果配置启用且有请求体，序列化并加入参数
+	if shouldInclude && body != nil {
 		bodyBytes, err := json.Marshal(body)
 		if err != nil {
 			return nil, err
@@ -128,8 +135,9 @@ func BuildSignParams(appID string, body interface{}) (map[string]string, error) 
 }
 
 // QuickSign 快速生成签名（便捷方法）
-func QuickSign(appID, appSecret string, body interface{}) (params map[string]string, sign string, err error) {
-	params, err = BuildSignParams(appID, body)
+// includeBody: 是否将请求体包含在签名中（默认false，推荐）
+func QuickSign(appID, appSecret string, body interface{}, includeBody ...bool) (params map[string]string, sign string, err error) {
+	params, err = BuildSignParams(appID, body, includeBody...)
 	if err != nil {
 		return nil, "", err
 	}

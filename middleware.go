@@ -191,7 +191,7 @@ func (m *AuthMiddleware) Authenticate(errorHandler ...ErrorHandler) gin.HandlerF
 		}
 
 		// 提取请求参数用于签名验证
-		params, err := m.extractRequestParams(c, appID, timestamp, nonce)
+		params, err := m.extractRequestParams(c, appID, timestamp, nonce, app)
 		if err != nil {
 			m.logger.Error("参数提取失败", "error", err)
 			handler(c, http.StatusBadRequest, "参数提取失败", err.Error())
@@ -261,15 +261,21 @@ func (m *AuthMiddleware) checkIPWhitelist(clientIP string, whitelist []string) b
 }
 
 // extractRequestParams 提取请求参数用于签名验证
-func (m *AuthMiddleware) extractRequestParams(c *gin.Context, appID, timestamp, nonce string) (map[string]string, error) {
+func (m *AuthMiddleware) extractRequestParams(c *gin.Context, appID, timestamp, nonce string, app *AppConfig) (map[string]string, error) {
 	params := map[string]string{
 		"appId":     appID,
 		"timestamp": timestamp,
 		"nonce":     nonce,
 	}
 
-	// 获取请求体参数（如果是POST/PUT请求）
-	if c.Request.Method == "POST" || c.Request.Method == "PUT" {
+	// 确定是否包含请求体在签名中
+	includeBody := m.config.SignIncludeBody
+	if app.SignIncludeBody != nil {
+		includeBody = *app.SignIncludeBody // 应用级别配置覆盖全局配置
+	}
+
+	// 获取请求体参数（如果配置启用且是POST/PUT请求）
+	if includeBody && (c.Request.Method == "POST" || c.Request.Method == "PUT") {
 		contentType := c.GetHeader("Content-Type")
 		if strings.Contains(contentType, "application/json") {
 			// JSON格式的请求体参与签名验证
@@ -294,6 +300,18 @@ func (m *AuthMiddleware) extractRequestParams(c *gin.Context, appID, timestamp, 
 				if len(v) > 0 && k != "sign" {
 					params[k] = v[0]
 				}
+			}
+		}
+	} else if c.Request.Method == "POST" || c.Request.Method == "PUT" {
+		// 即使不包含body在签名中，也需要恢复body供后续处理
+		contentType := c.GetHeader("Content-Type")
+		if strings.Contains(contentType, "application/json") {
+			bodyBytes, err := c.GetRawData()
+			if err != nil {
+				return nil, err
+			}
+			if len(bodyBytes) > 0 {
+				c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 			}
 		}
 	}

@@ -11,23 +11,25 @@ import (
 
 // AppConfig 应用配置
 type AppConfig struct {
-	AppID         string   `json:"app_id" yaml:"app_id"`                   // 应用ID
-	AppSecret     string   `json:"app_secret" yaml:"app_secret"`           // 应用密钥
-	AppName       string   `json:"app_name" yaml:"app_name"`               // 应用名称
-	RequireSign   bool     `json:"require_sign" yaml:"require_sign"`       // 是否需要签名验证
-	IPWhitelist   []string `json:"ip_whitelist" yaml:"ip_whitelist"`      // IP白名单
-	AllowedRoutes []string `json:"allowed_routes" yaml:"allowed_routes"`  // 允许访问的路由
-	RateLimit     int      `json:"rate_limit" yaml:"rate_limit"`          // 速率限制(次/分钟)
-	Enabled       bool     `json:"enabled" yaml:"enabled"`                // 是否启用
+	AppID           string   `json:"app_id" yaml:"app_id"`                                                           // 应用ID
+	AppSecret       string   `json:"app_secret" yaml:"app_secret"`                                                   // 应用密钥
+	AppName         string   `json:"app_name" yaml:"app_name"`                                                       // 应用名称
+	RequireSign     bool     `json:"require_sign" yaml:"require_sign"`                                               // 是否需要签名验证
+	SignIncludeBody *bool    `json:"sign_include_body,omitempty" yaml:"sign_include_body,omitempty"`                // 签名是否包含请求体（可选，覆盖全局配置）
+	IPWhitelist     []string `json:"ip_whitelist" yaml:"ip_whitelist"`                                              // IP白名单
+	AllowedRoutes   []string `json:"allowed_routes" yaml:"allowed_routes"`                                          // 允许访问的路由
+	RateLimit       int      `json:"rate_limit" yaml:"rate_limit"`                                                  // 速率限制(次/分钟)
+	Enabled         bool     `json:"enabled" yaml:"enabled"`                                                        // 是否启用
 }
 
 // Config 认证配置管理器
 type Config struct {
-	Apps              map[string]*AppConfig `json:"apps" yaml:"apps"`                                   // 应用配置映射
-	TimestampTolerance int64                `json:"timestamp_tolerance" yaml:"timestamp_tolerance"`     // 时间戳容差(秒)
-	DefaultRateLimit  int                   `json:"default_rate_limit" yaml:"default_rate_limit"`       // 默认速率限制
-	EnableIPCheck     bool                  `json:"enable_ip_check" yaml:"enable_ip_check"`             // 是否启用IP检查
-	mu                sync.RWMutex          `json:"-" yaml:"-"`
+	Apps               map[string]*AppConfig `json:"apps" yaml:"apps"`                                   // 应用配置映射
+	TimestampTolerance int64                 `json:"timestamp_tolerance" yaml:"timestamp_tolerance"`     // 时间戳容差(秒)
+	DefaultRateLimit   int                   `json:"default_rate_limit" yaml:"default_rate_limit"`       // 默认速率限制
+	EnableIPCheck      bool                  `json:"enable_ip_check" yaml:"enable_ip_check"`             // 是否启用IP检查
+	SignIncludeBody    bool                  `json:"sign_include_body" yaml:"sign_include_body"`         // 签名是否包含请求体（默认false，推荐）
+	mu                 sync.RWMutex          `json:"-" yaml:"-"`
 }
 
 // ConfigOption 配置选项函数
@@ -54,13 +56,21 @@ func WithIPCheck(enabled bool) ConfigOption {
 	}
 }
 
+// WithConfigSignIncludeBody 设置配置中签名是否包含请求体
+func WithConfigSignIncludeBody(include bool) ConfigOption {
+	return func(c *Config) {
+		c.SignIncludeBody = include
+	}
+}
+
 // NewConfig 创建新的配置管理器
 func NewConfig(opts ...ConfigOption) *Config {
 	c := &Config{
 		Apps:               make(map[string]*AppConfig),
-		TimestampTolerance: 300,  // 默认5分钟
+		TimestampTolerance: 300,   // 默认5分钟
 		DefaultRateLimit:   1000,
 		EnableIPCheck:      true,
+		SignIncludeBody:    false, // 默认不包含请求体（推荐，更灵活）
 	}
 	
 	// 应用配置选项
