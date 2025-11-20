@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"payment_service/pkg/goauth"
+	"github.com/difyz9/go-auth"
 )
 
 // ============================

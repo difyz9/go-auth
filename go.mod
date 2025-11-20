@@ -1,4 +1,4 @@
-module github.com/yourusername/goauth
+module github.com/difyz9/go-auth
 
 go 1.21
 
