@@ -74,10 +74,51 @@ func NewAuthMiddleware(opts Options) *AuthMiddleware {
 	}
 	
 	return &AuthMiddleware{
-		config:     opts.Config,
+		config:      opts.Config,
 		rateLimiter: NewRateLimiter(),
-		logger:     opts.Logger,
+		logger:      opts.Logger,
 	}
+}
+
+// New 创建认证中间件的便捷方法
+func New(config *Config) *AuthMiddleware {
+	return NewAuthMiddleware(Options{Config: config})
+}
+
+// WithConfig 设置配置
+func (m *AuthMiddleware) WithConfig(config *Config) *AuthMiddleware {
+	m.config = config
+	return m
+}
+
+// WithLogger 设置日志
+func (m *AuthMiddleware) WithLogger(logger Logger) *AuthMiddleware {
+	m.logger = logger
+	return m
+}
+
+// MustLoadYAML 从YAML加载配置（失败则panic）
+func MustLoadYAML(filePath string) *Config {
+	config := NewConfig()
+	if err := config.LoadFromYAML(filePath); err != nil {
+		panic(fmt.Sprintf("加载配置文件失败: %v", err))
+	}
+	if err := config.Validate(); err != nil {
+		panic(fmt.Sprintf("配置验证失败: %v", err))
+	}
+	return config
+}
+
+// MustLoadJSON 从JSON加载配置（失败则panic）
+func MustLoadJSON(filePath string) *Config {
+	config := NewConfig()
+	if err := config.LoadFromJSON(filePath); err != nil {
+		panic(fmt.Sprintf("加载配置文件失败: %v", err))
+	}
+	if err := config.Validate(); err != nil {
+		panic(fmt.Sprintf("配置验证失败: %v", err))
+	}
+	return config
 }
 
 // Authenticate 认证中间件处理函数

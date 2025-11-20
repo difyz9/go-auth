@@ -30,14 +30,45 @@ type Config struct {
 	mu                sync.RWMutex          `json:"-" yaml:"-"`
 }
 
-// NewConfig 创建新的配置管理器
-func NewConfig() *Config {
-	return &Config{
-		Apps:              make(map[string]*AppConfig),
-		TimestampTolerance: 300, // 默认5分钟
-		DefaultRateLimit:  1000,
-		EnableIPCheck:     true,
+// ConfigOption 配置选项函数
+type ConfigOption func(*Config)
+
+// WithTimestampTolerance 设置时间戳容差
+func WithTimestampTolerance(seconds int64) ConfigOption {
+	return func(c *Config) {
+		c.TimestampTolerance = seconds
 	}
+}
+
+// WithDefaultRateLimit 设置默认速率限制
+func WithDefaultRateLimit(limit int) ConfigOption {
+	return func(c *Config) {
+		c.DefaultRateLimit = limit
+	}
+}
+
+// WithIPCheck 设置是否启用IP检查
+func WithIPCheck(enabled bool) ConfigOption {
+	return func(c *Config) {
+		c.EnableIPCheck = enabled
+	}
+}
+
+// NewConfig 创建新的配置管理器
+func NewConfig(opts ...ConfigOption) *Config {
+	c := &Config{
+		Apps:               make(map[string]*AppConfig),
+		TimestampTolerance: 300,  // 默认5分钟
+		DefaultRateLimit:   1000,
+		EnableIPCheck:      true,
+	}
+	
+	// 应用配置选项
+	for _, opt := range opts {
+		opt(c)
+	}
+	
+	return c
 }
 
 // AddApp 添加应用配置
@@ -134,4 +165,65 @@ func (c *Config) SaveToJSON(filePath string) error {
 	}
 	
 	return nil
+}
+
+// Validate 验证配置是否有效
+func (c *Config) Validate() error {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	
+	if c.TimestampTolerance <= 0 {
+		return fmt.Errorf("时间戳容差必须大于0")
+	}
+	
+	if c.DefaultRateLimit <= 0 {
+		return fmt.Errorf("默认速率限制必须大于0")
+	}
+	
+	for appID, app := range c.Apps {
+		if app.AppID == "" {
+			return fmt.Errorf("应用ID不能为空")
+		}
+		if app.AppID != appID {
+			return fmt.Errorf("应用ID不匹配: %s != %s", app.AppID, appID)
+		}
+		if app.AppSecret == "" {
+			return fmt.Errorf("应用[%s]的密钥不能为空", appID)
+		}
+		if len(app.AppSecret) < 16 {
+			return fmt.Errorf("应用[%s]的密钥长度不能少于16位", appID)
+		}
+		if app.RateLimit < 0 {
+			return fmt.Errorf("应用[%s]的速率限制不能为负数", appID)
+		}
+	}
+	
+	return nil
+}
+
+// GetApps 获取所有应用配置（副本）
+func (c *Config) GetApps() map[string]*AppConfig {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	
+	apps := make(map[string]*AppConfig, len(c.Apps))
+	for k, v := range c.Apps {
+		appCopy := *v
+		apps[k] = &appCopy
+	}
+	return apps
+}
+
+// GetEnabledAppCount 获取启用的应用数量
+func (c *Config) GetEnabledAppCount() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	
+	count := 0
+	for _, app := range c.Apps {
+		if app.Enabled {
+			count++
+		}
+	}
+	return count
 }

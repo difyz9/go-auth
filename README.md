@@ -21,39 +21,7 @@ go get github.com/difyz9/go-auth
 
 ## 快速开始
 
-### 1. 创建配置文件
-
-创建 `goauth_config.yaml`:
-
-```yaml
-timestamp_tolerance: 300  # 时间戳容差（秒）
-default_rate_limit: 1000  # 默认速率限制（次/分钟）
-enable_ip_check: true     # 是否启用IP检查
-
-apps:
-  test-app-001:
-    app_id: test-app-001
-    app_secret: your-secret-key-here
-    app_name: 测试应用
-    require_sign: true
-    enabled: true
-    rate_limit: 100
-    ip_whitelist:
-      - "*"  # 允许所有IP，生产环境请配置具体IP
-    
-  production-app:
-    app_id: prod-app-001
-    app_secret: prod-secret-key-here
-    app_name: 生产应用
-    require_sign: true
-    enabled: true
-    rate_limit: 1000
-    ip_whitelist:
-      - "192.168.1.*"
-      - "10.0.0.1"
-```
-
-### 2. 集成到 Gin 应用
+### 最简单的方式（2行代码）
 
 ```go
 package main
@@ -64,104 +32,126 @@ import (
 )
 
 func main() {
-    // 创建配置
-    config := goauth.NewConfig()
-    
-    // 从文件加载配置
-    if err := config.LoadFromYAML("goauth_config.yaml"); err != nil {
-        panic(err)
-    }
-    
-    // 创建认证中间件
-    authMiddleware := goauth.NewAuthMiddleware(goauth.Options{
-        Config: config,
-    })
-    
-    // 创建 Gin 路由
     r := gin.Default()
     
-    // 应用认证中间件
-    api := r.Group("/api")
-    api.Use(authMiddleware.Authenticate())
-    {
-        api.GET("/users", getUsers)
-        api.POST("/orders", createOrder)
-    }
+    // 只需两行代码即可启用认证！
+    config := goauth.QuickConfig("my-app", "my-secret-key-123456")
+    r.Use(goauth.New(config).Authenticate())
+    
+    r.GET("/api/users", func(c *gin.Context) {
+        c.JSON(200, gin.H{"users": []string{"Alice", "Bob"}})
+    })
     
     r.Run(":8080")
 }
-
-func getUsers(c *gin.Context) {
-    // 获取当前应用信息
-    app, _ := goauth.GetAppFromContext(c)
-    c.JSON(200, gin.H{
-        "app": app.AppName,
-        "users": []string{"user1", "user2"},
-    })
-}
-
-func createOrder(c *gin.Context) {
-    c.JSON(200, gin.H{"status": "success"})
-}
 ```
 
-### 3. 客户端调用示例
+### 使用配置构建器（链式调用）
+
+```go
+// 使用链式调用优雅地构建配置
+config := goauth.NewConfigBuilder().
+    SetTimestampTolerance(600).
+    SetDefaultRateLimit(2000).
+    AddSimpleApp("app-001", "secret-001", "应用1").
+    AddSimpleApp("app-002", "secret-002", "应用2").
+    MustBuild()
+
+r := gin.Default()
+r.Use(goauth.New(config).Authenticate())
+r.Run(":8080")
+```
+
+### 从配置文件加载
+
+#### 1. 创建 `goauth_config.yaml`
+
+```yaml
+timestamp_tolerance: 300
+default_rate_limit: 1000
+enable_ip_check: true
+
+apps:
+  test-app-001:
+    app_id: test-app-001
+    app_secret: your-secret-key-here
+    app_name: 测试应用
+    require_sign: true
+    enabled: true
+    rate_limit: 100
+    ip_whitelist:
+      - "*"
+```
+
+#### 2. 一行代码加载配置
 
 ```go
 package main
 
 import (
-    "bytes"
-    "encoding/json"
-    "fmt"
-    "net/http"
-    "strconv"
-    "time"
-    
+    "github.com/gin-gonic/gin"
     "github.com/difyz9/go-auth"
 )
 
 func main() {
-    appID := "test-app-001"
-    appSecret := "your-secret-key-here"
+    r := gin.Default()
     
-    // 准备请求参数
-    timestamp := strconv.FormatInt(time.Now().Unix(), 10)
-    nonce := goauth.GenerateNonce(16)
+    // 自动加载并验证配置
+    config := goauth.MustLoadYAML("goauth_config.yaml")
+    r.Use(goauth.New(config).Authenticate())
     
-    // 请求体
-    requestBody := map[string]interface{}{
-        "user_id": 123,
-        "amount":  100.00,
-    }
-    bodyBytes, _ := json.Marshal(requestBody)
+    r.GET("/api/data", handleData)
+    r.Run(":8080")
+}
+
+func handleData(c *gin.Context) {
+    app, _ := goauth.GetAppFromContext(c)
+    c.JSON(200, gin.H{
+        "app": app.AppName,
+        "data": []int{1, 2, 3},
+    })
+}
+```
+
+### 客户端调用（超简单）
+
+```go
+package main
+
+import (
+    "fmt"
+    "github.com/difyz9/go-auth"
+)
+
+func main() {
+    // 创建客户端
+    client := goauth.NewClient(
+        "http://localhost:8080",
+        "my-app",
+        "my-secret-key-123456",
+        goauth.WithDebug(true), // 可选：启用调试
+    )
     
-    // 生成签名
-    params := map[string]string{
-        "appId":       appID,
-        "timestamp":   timestamp,
-        "nonce":       nonce,
-        "requestBody": string(bodyBytes),
-    }
-    sign := goauth.GenerateSign(params, appSecret)
-    
-    // 发送请求
-    req, _ := http.NewRequest("POST", "http://localhost:8080/api/orders", bytes.NewBuffer(bodyBytes))
-    req.Header.Set("Content-Type", "application/json")
-    req.Header.Set("X-App-Id", appID)
-    req.Header.Set("X-Timestamp", timestamp)
-    req.Header.Set("X-Nonce", nonce)
-    req.Header.Set("X-Sign", sign)
-    
-    client := &http.Client{}
-    resp, err := client.Do(req)
-    if err != nil {
+    // GET 请求
+    var users map[string]interface{}
+    if err := client.GetJSON("/api/users", &users); err != nil {
         fmt.Println("请求失败:", err)
         return
     }
-    defer resp.Body.Close()
+    fmt.Printf("用户列表: %+v\n", users)
     
-    fmt.Println("响应状态:", resp.Status)
+    // POST 请求
+    orderData := map[string]interface{}{
+        "user_id": 123,
+        "amount":  99.99,
+    }
+    
+    var result map[string]interface{}
+    if err := client.PostJSON("/api/orders", orderData, &result); err != nil {
+        fmt.Println("请求失败:", err)
+        return
+    }
+    fmt.Printf("订单结果: %+v\n", result)
 }
 ```
 
@@ -189,12 +179,16 @@ func main() {
 
 ## 高级用法
 
-### 1. 内存配置（无需配置文件）
+### 1. 使用函数式选项创建配置
 
 ```go
-config := goauth.NewConfig()
+// 使用函数式选项优雅地自定义配置
+config := goauth.NewConfig(
+    goauth.WithTimestampTolerance(600),      // 10分钟容差
+    goauth.WithDefaultRateLimit(2000),        // 2000次/分钟
+    goauth.WithIPCheck(false),                // 禁用IP检查
+)
 
-// 添加应用配置
 config.AddApp(&goauth.AppConfig{
     AppID:       "app-001",
     AppSecret:   "secret-key",
@@ -204,49 +198,37 @@ config.AddApp(&goauth.AppConfig{
     RateLimit:   100,
     IPWhitelist: []string{"192.168.1.*"},
 })
-
-authMiddleware := goauth.NewAuthMiddleware(goauth.Options{
-    Config: config,
-})
 ```
 
-### 2. 自定义错误处理
+### 2. 统一的错误响应格式
 
 ```go
+// 使用内置的统一错误响应格式
 customErrorHandler := func(c *gin.Context, code int, message string, detail string) {
-    c.JSON(code, gin.H{
-        "success": false,
-        "error": gin.H{
-            "code":    code,
-            "message": message,
-            "detail":  detail,
-        },
-        "timestamp": time.Now().Unix(),
-    })
+    requestID := goauth.BuildRequestID()
+    
+    err := goauth.NewAuthError(
+        goauth.ErrorCode(message),
+        message,
+        detail,
+        code,
+    )
+    
+    response := goauth.NewErrorResponse(err, requestID)
+    c.JSON(code, response)
 }
 
-r.Use(authMiddleware.Authenticate(customErrorHandler))
+r.Use(goauth.New(config).Authenticate(customErrorHandler))
 ```
 
-### 3. 自定义日志
+### 3. 链式调用创建中间件
 
 ```go
-type MyLogger struct{}
+// 使用链式调用配置中间件
+auth := goauth.New(config).
+    WithLogger(&MyLogger{})
 
-func (l *MyLogger) Info(msg string, fields ...interface{})  { 
-    log.Info(msg, fields...) 
-}
-func (l *MyLogger) Error(msg string, fields ...interface{}) { 
-    log.Error(msg, fields...) 
-}
-func (l *MyLogger) Debug(msg string, fields ...interface{}) { 
-    log.Debug(msg, fields...) 
-}
-
-authMiddleware := goauth.NewAuthMiddleware(goauth.Options{
-    Config: config,
-    Logger: &MyLogger{},
-})
+r.Use(auth.Authenticate())
 ```
 
 ### 4. 动态管理应用
@@ -262,11 +244,92 @@ config.AddApp(&goauth.AppConfig{
 // 获取应用
 app, exists := config.GetApp("new-app")
 
+// 获取所有应用
+apps := config.GetApps()
+
+// 获取启用的应用数量
+count := config.GetEnabledAppCount()
+
 // 删除应用
 config.RemoveApp("new-app")
 
+// 验证配置
+if err := config.Validate(); err != nil {
+    log.Fatal("配置验证失败:", err)
+}
+
 // 保存配置到文件
 config.SaveToYAML("goauth_config.yaml")
+```
+
+### 5. 便捷的签名工具
+
+```go
+// 快速生成签名
+params, sign, err := goauth.QuickSign(appID, appSecret, requestBody)
+if err != nil {
+    log.Fatal(err)
+}
+
+// 调试签名问题
+client := goauth.NewClient(baseURL, appID, appSecret)
+client.DebugSign(requestBody)  // 输出详细的签名信息
+
+// 验证签名并获取调试信息
+valid, debugInfo := goauth.VerifySignWithDebug(params, appSecret, sign)
+fmt.Println(debugInfo)
+```
+
+### 6. 实用工具函数
+
+```go
+// 生成安全的应用密钥
+secret, err := goauth.GenerateAppSecret(32)
+
+// 遮蔽密钥用于日志输出
+masked := goauth.MaskSecret(secret)  // 输出: abcd****xyz
+
+// 验证应用ID格式
+if err := goauth.ValidateAppID("my-app-123"); err != nil {
+    log.Fatal("应用ID无效")
+}
+
+// 生成请求ID
+requestID := goauth.BuildRequestID()
+
+// 生成加密安全的随机字符串
+nonce, err := goauth.GenerateSecureNonce(16)
+```
+
+### 7. 配置构建器模式
+
+```go
+// 使用构建器模式创建复杂配置
+config, err := goauth.NewConfigBuilder().
+    SetTimestampTolerance(600).
+    SetDefaultRateLimit(2000).
+    SetEnableIPCheck(true).
+    AddSimpleApp("app-001", "secret-001", "应用1").
+    AddSimpleApp("app-002", "secret-002", "应用2").
+    AddApp(&goauth.AppConfig{
+        AppID:       "app-003",
+        AppSecret:   "secret-003",
+        AppName:     "应用3",
+        RequireSign: false,  // 不需要签名
+        Enabled:     true,
+        RateLimit:   500,
+        IPWhitelist: []string{"192.168.1.*"},
+    }).
+    Build()
+
+if err != nil {
+    log.Fatal("配置构建失败:", err)
+}
+
+// 或使用 MustBuild（失败则panic）
+config := goauth.NewConfigBuilder().
+    AddSimpleApp("app-001", "secret-001", "应用1").
+    MustBuild()
 ```
 
 ## API 认证流程

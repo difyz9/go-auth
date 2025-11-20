@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
@@ -99,4 +100,54 @@ func SignatureExample(appID, appSecret string, additionalParams map[string]strin
 	params["sign"] = sign
 
 	return params
+}
+
+// 用于测试的时间函数（可以被mock）
+var timeNow = time.Now
+
+// BuildSignParams 构建签名参数（便捷方法）
+func BuildSignParams(appID string, body interface{}) (map[string]string, error) {
+	params := map[string]string{
+		"appId":     appID,
+		"timestamp": strconv.FormatInt(timeNow().Unix(), 10),
+		"nonce":     GenerateNonce(16),
+	}
+	
+	// 如果有请求体，序列化并加入参数
+	if body != nil {
+		bodyBytes, err := json.Marshal(body)
+		if err != nil {
+			return nil, err
+		}
+		if len(bodyBytes) > 0 {
+			params["requestBody"] = string(bodyBytes)
+		}
+	}
+	
+	return params, nil
+}
+
+// QuickSign 快速生成签名（便捷方法）
+func QuickSign(appID, appSecret string, body interface{}) (params map[string]string, sign string, err error) {
+	params, err = BuildSignParams(appID, body)
+	if err != nil {
+		return nil, "", err
+	}
+	
+	sign = GenerateSign(params, appSecret)
+	return params, sign, nil
+}
+
+// VerifySignWithDebug 验证签名并输出调试信息
+func VerifySignWithDebug(params map[string]string, appSecret string, receivedSign string) (bool, string) {
+	expectedSign := GenerateSign(params, appSecret)
+	
+	debugInfo := fmt.Sprintf(
+		"预期签名: %s\n收到签名: %s\n签名参数: %v",
+		expectedSign,
+		receivedSign,
+		params,
+	)
+	
+	return strings.EqualFold(expectedSign, receivedSign), debugInfo
 }
