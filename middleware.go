@@ -316,12 +316,9 @@ func (m *AuthMiddleware) extractRequestParams(c *gin.Context, appID, timestamp, 
 		}
 	}
 
-	// 获取查询参数
-	for k, v := range c.Request.URL.Query() {
-		if len(v) > 0 && k != "sign" {
-			params[k] = v[0]
-		}
-	}
+	// 注意：URL 查询参数不参与签名计算
+	// 这样设计是为了简化客户端使用，降低集成难度
+	// 认证安全性由 appId + timestamp + nonce + HMAC-SHA256 保证
 
 	return params, nil
 }
