@@ -26,9 +26,10 @@ const (
 
 // AuthMiddleware API认证中间件
 type AuthMiddleware struct {
-	config     *Config
+	config      *Config
 	rateLimiter *RateLimiter
-	logger     Logger
+	logger      Logger
+	jwtService  *JWTService // JWT 服务（可选）
 }
 
 // Logger 日志接口

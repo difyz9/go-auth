@@ -29,6 +29,8 @@ type Config struct {
 	DefaultRateLimit   int                   `json:"default_rate_limit" yaml:"default_rate_limit"`       // 默认速率限制
 	EnableIPCheck      bool                  `json:"enable_ip_check" yaml:"enable_ip_check"`             // 是否启用IP检查
 	SignIncludeBody    bool                  `json:"sign_include_body" yaml:"sign_include_body"`         // 签名是否包含请求体（默认false，推荐）
+	JWT                *JWTConfig            `json:"jwt,omitempty" yaml:"jwt,omitempty"`                 // JWT 配置（可选）
+	TokenBlacklist     *TokenBlacklistConfig `json:"token_blacklist,omitempty" yaml:"token_blacklist,omitempty"` // Token 黑名单配置（可选）
 	mu                 sync.RWMutex          `json:"-" yaml:"-"`
 }
 
