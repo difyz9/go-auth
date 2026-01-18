@@ -205,16 +205,11 @@ func (c *Client) Request(method, path string, body interface{}) ([]byte, error) 
 	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
 	nonce := goauth.GenerateNonce(16)
 
-	// 生成签名参数
+	// 生成签名参数（不包含请求体）
 	params := map[string]string{
 		"appId":     c.AppID,
 		"timestamp": timestamp,
 		"nonce":     nonce,
-	}
-
-	// 如果有请求体，加入签名
-	if len(bodyBytes) > 0 {
-		params["requestBody"] = string(bodyBytes)
 	}
 
 	// 生成签名

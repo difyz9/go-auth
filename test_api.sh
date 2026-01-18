@@ -64,7 +64,7 @@ fi
 
 echo ""
 echo "========================================"
-echo "测试 2: POST 请求（带请求体）"
+echo "测试 2: POST 请求（不包含请求体在签名中）"
 echo "========================================"
 
 # 重新生成参数（避免 nonce 重复）
@@ -74,8 +74,8 @@ NONCE=$(openssl rand -hex 8)
 # 请求体
 REQUEST_BODY='{"user_id":123,"amount":99.99}'
 
-# 构建签名参数（包含请求体）
-params="appId=${APP_ID}&nonce=${NONCE}&requestBody=${REQUEST_BODY}&timestamp=${TIMESTAMP}"
+# 构建签名参数（不包含请求体）
+params="appId=${APP_ID}&nonce=${NONCE}&timestamp=${TIMESTAMP}"
 sign=$(generate_sign "$params")
 
 echo "请求参数:"

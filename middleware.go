@@ -269,42 +269,8 @@ func (m *AuthMiddleware) extractRequestParams(c *gin.Context, appID, timestamp, 
 		"nonce":     nonce,
 	}
 
-	// 确定是否包含请求体在签名中
-	includeBody := m.config.SignIncludeBody
-	if app.SignIncludeBody != nil {
-		includeBody = *app.SignIncludeBody // 应用级别配置覆盖全局配置
-	}
-
-	// 获取请求体参数（如果配置启用且是POST/PUT请求）
-	if includeBody && (c.Request.Method == "POST" || c.Request.Method == "PUT") {
-		contentType := c.GetHeader("Content-Type")
-		if strings.Contains(contentType, "application/json") {
-			// JSON格式的请求体参与签名验证
-			bodyBytes, err := c.GetRawData()
-			if err != nil {
-				return nil, err
-			}
-
-			if len(bodyBytes) > 0 {
-				// 将请求体作为一个特殊参数加入签名
-				params["requestBody"] = string(bodyBytes)
-
-				// 重新设置请求体供后续处理使用
-				c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-			}
-		} else {
-			// 表单格式的请求
-			if err := c.Request.ParseForm(); err != nil {
-				return nil, err
-			}
-			for k, v := range c.Request.PostForm {
-				if len(v) > 0 && k != "sign" {
-					params[k] = v[0]
-				}
-			}
-		}
-	} else if c.Request.Method == "POST" || c.Request.Method == "PUT" {
-		// 即使不包含body在签名中，也需要恢复body供后续处理
+	// 签名不包含请求体，但需要保留body供后续处理
+	if c.Request.Method == "POST" || c.Request.Method == "PUT" {
 		contentType := c.GetHeader("Content-Type")
 		if strings.Contains(contentType, "application/json") {
 			bodyBytes, err := c.GetRawData()

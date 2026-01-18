@@ -13,9 +13,7 @@ func main() {
 	// ========== 示例1：基础配置（默认不包含请求体） ==========
 	fmt.Println("=== 示例1：基础配置 ===")
 	
-	config := goauth.NewConfig(
-		goauth.WithSignIncludeBody(false), // 明确设置不包含请求体（推荐）
-	)
+	config := goauth.NewConfig()
 	
 	// 添加应用
 	config.AddApp(&goauth.AppConfig{
@@ -60,8 +58,7 @@ func main() {
 			"http://localhost:8089",
 			"test-app-001",
 			"tmcf5m6qcm6k9hrp3sy8rhgafu00ttph",
-			goauth.WithSignIncludeBody(false), // 明确设置不包含请求体
-			goauth.WithDebug(true),            // 启用调试
+			goauth.WithDebug(true), // 启用调试
 		)
 		
 		// POST请求
@@ -82,51 +79,7 @@ func main() {
 	r.Run(":8089")
 }
 
-// ========== 示例2：高安全模式（包含请求体） ==========
-func exampleHighSecurity() {
-	fmt.Println("=== 示例2：高安全模式 ===")
-	
-	config := goauth.NewConfig(
-		goauth.WithSignIncludeBody(false), // 全局默认false
-	)
-	
-	// 添加普通应用
-	config.AddApp(&goauth.AppConfig{
-		AppID:       "normal-app",
-		AppSecret:   "normal-secret",
-		Enabled:     true,
-		RequireSign: true,
-		// 使用全局配置（不包含请求体）
-	})
-	
-	// 添加高安全应用（覆盖全局配置）
-	includeBody := true
-	config.AddApp(&goauth.AppConfig{
-		AppID:           "secure-app",
-		AppSecret:       "secure-secret",
-		Enabled:         true,
-		RequireSign:     true,
-		SignIncludeBody: &includeBody, // 覆盖全局配置
-	})
-	
-	middleware := goauth.NewAuthMiddleware(goauth.Options{
-		Config: config,
-	})
-	
-	r := gin.Default()
-	r.Use(middleware.Authenticate())
-	
-	// 支付接口（高安全，验证请求体）
-	r.POST("/api/payment", func(c *gin.Context) {
-		var req struct {
-			Amount float64 `json:"amount"`
-			CardNo string  `json:"card_no"`
-		}
-		
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
+// exampleHighSecurity 之前的高安全模式示例已移除，因为不再支持请求体签名
 		
 		c.JSON(http.StatusOK, gin.H{
 			"message": "支付成功",
