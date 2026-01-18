@@ -1,6 +1,7 @@
 package goauth
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 )
@@ -101,6 +102,20 @@ var (
 		"",
 		http.StatusTooManyRequests,
 	)
+)
+
+// 标准错误变量（用于 errors.Is 判断）
+var (
+	// ErrTimestampExpired 时间戳过期错误
+	ErrTimestampExpired = errors.New("timestamp expired")
+	// ErrNonceReused Nonce重复使用错误
+	ErrNonceReused = errors.New("nonce already used")
+	// ErrSignatureMismatch 签名不匹配错误
+	ErrSignatureMismatch = errors.New("signature mismatch")
+	// ErrRequestBodyInvalid 请求体无效错误
+	ErrRequestBodyInvalid = errors.New("request body invalid")
+	// ErrConfigInvalid 配置无效错误
+	ErrConfigInvalid = errors.New("config invalid")
 )
 
 // ErrorResponse 标准错误响应格式

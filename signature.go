@@ -2,6 +2,7 @@ package goauth
 
 import (
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -70,12 +71,23 @@ func ValidateTimestamp(timestamp string, tolerance int64) bool {
 }
 
 // GenerateNonce 生成随机字符串
+// 使用 crypto/rand 生成密码学安全的随机数
 func GenerateNonce(length int) string {
 	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	b := make([]byte, length)
-	for i := range b {
-		b[i] = charset[time.Now().UnixNano()%int64(len(charset))]
+	
+	// 使用 crypto/rand 生成随机字节
+	if _, err := rand.Read(b); err != nil {
+		// 如果随机数生成失败，使用时间戳作为后备方案
+		// 这种情况极少发生，但为了保证系统可用性，提供降级方案
+		return fmt.Sprintf("%d", time.Now().UnixNano())
 	}
+	
+	// 将随机字节映射到字符集
+	for i := 0; i < length; i++ {
+		b[i] = charset[b[i]%byte(len(charset))]
+	}
+	
 	return string(b)
 }
 

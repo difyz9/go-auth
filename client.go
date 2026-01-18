@@ -12,11 +12,12 @@ import (
 
 // Client API认证客户端
 type Client struct {
-	BaseURL         string
-	AppID           string
-	AppSecret       string
-	HTTPClient      *http.Client
-	Debug           bool // 调试模式
+	BaseURL    string
+	AppID      string
+	AppSecret  string
+	HTTPClient *http.Client
+	Debug      bool   // 调试模式
+	Logger     Logger // 日志接口
 }
 
 // ClientOption 客户端配置选项
@@ -43,6 +44,13 @@ func WithHTTPClient(httpClient *http.Client) ClientOption {
 	}
 }
 
+// WithLogger 设置自定义日志器
+func WithLogger(logger Logger) ClientOption {
+	return func(c *Client) {
+		c.Logger = logger
+	}
+}
+
 // NewClient 创建新的API客户端
 func NewClient(baseURL, appID, appSecret string, opts ...ClientOption) *Client {
 	client := &Client{
@@ -52,7 +60,8 @@ func NewClient(baseURL, appID, appSecret string, opts ...ClientOption) *Client {
 		HTTPClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
-		Debug:           false,
+		Debug:  false,
+		Logger: &defaultLogger{}, // 默认日志器
 	}
 	
 	// 应用选项
@@ -92,13 +101,10 @@ func (c *Client) Request(method, path string, body interface{}, headers ...map[s
 	
 	// 调试输出
 	if c.Debug {
-		fmt.Printf("[GoAuth Client] Request: %s %s\n", method, path)
-		fmt.Printf("[GoAuth Client] AppID: %s\n", c.AppID)
-		fmt.Printf("[GoAuth Client] Timestamp: %s\n", timestamp)
-		fmt.Printf("[GoAuth Client] Nonce: %s\n", nonce)
-		fmt.Printf("[GoAuth Client] Sign: %s\n", sign)
+		c.Logger.Debug("Sending request", "method", method, "path", path, "appId", c.AppID)
+		c.Logger.Debug("Auth params", "timestamp", timestamp, "nonce", nonce, "sign", sign)
 		if len(bodyBytes) > 0 {
-			fmt.Printf("[GoAuth Client] Body: %s\n", string(bodyBytes))
+			c.Logger.Debug("Request body", "body", string(bodyBytes))
 		}
 	}
 	
@@ -172,17 +178,24 @@ func (c *Client) DoJSON(method, path string, body interface{}, result interface{
 	}
 	
 	if c.Debug {
-		fmt.Printf("[GoAuth Client] Response Status: %d\n", resp.StatusCode)
-		fmt.Printf("[GoAuth Client] Response Body: %s\n", string(respBody))
+		c.Logger.Debug("Response received", "status", resp.StatusCode, "body", string(respBody))
 	}
 	
+	// 先检查 HTTP 状态码
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("请求失败: %d, %s", resp.StatusCode, string(respBody))
+		// 尝试解析为标准错误响应
+		var errResp ErrorResponse
+		if err := json.Unmarshal(respBody, &errResp); err == nil && errResp.Error != nil {
+			return fmt.Errorf("API错误 [%s]: %s", errResp.Error.Code, errResp.Error.Message)
+		}
+		// 如果不是标准错误格式，返回原始信息
+		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(respBody))
 	}
 	
+	// 解析成功响应
 	if result != nil {
 		if err := json.Unmarshal(respBody, result); err != nil {
-			return fmt.Errorf("解析响应失败: %w", err)
+			return fmt.Errorf("解析响应失败: %w (body: %s)", err, string(respBody))
 		}
 	}
 	
@@ -222,19 +235,11 @@ func (c *Client) DebugSign(body interface{}) {
 	
 	sign := GenerateSign(params, c.AppSecret)
 	
-	fmt.Println("=== 签名调试信息 ===")
-	fmt.Printf("AppID:     %s\n", c.AppID)
-	fmt.Printf("AppSecret: %s\n", c.AppSecret)
-	fmt.Printf("Timestamp: %s\n", timestamp)
-	fmt.Printf("Nonce:     %s\n", nonce)
-	fmt.Println("\n签名参数:")
-	for k, v := range params {
-		if k == "requestBody" && len(v) > 100 {
-			fmt.Printf("  %s: %s...\n", k, v[:100])
-		} else {
-			fmt.Printf("  %s: %s\n", k, v)
-		}
+	c.Logger.Info("=== 签名调试信息 ===")
+	c.Logger.Info("Basic info", "appId", c.AppID, "appSecret", MaskSecret(c.AppSecret))
+	c.Logger.Info("Auth params", "timestamp", timestamp, "nonce", nonce)
+	c.Logger.Info("Signature", "sign", sign)
+	if body != nil {
+		c.Logger.Info("Body", "data", body)
 	}
-	fmt.Printf("\n生成的签名: %s\n", sign)
-	fmt.Println("==================")
 }

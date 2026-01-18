@@ -2,8 +2,10 @@ package goauth
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -29,7 +31,8 @@ type AuthMiddleware struct {
 	config      *Config
 	rateLimiter *RateLimiter
 	logger      Logger
-	jwtService  *JWTService // JWT 服务（可选）
+	jwtService  *JWTService               // JWT 服务（可选）
+	appCache    map[string]*AppConfig     // 应用配置缓存（只读，无需锁）
 }
 
 // Logger 日志接口
@@ -74,10 +77,19 @@ func NewAuthMiddleware(opts Options) *AuthMiddleware {
 		opts.Logger = &defaultLogger{}
 	}
 	
+	// 预加载应用配置到缓存
+	appCache := make(map[string]*AppConfig)
+	opts.Config.mu.RLock()
+	for appID, app := range opts.Config.Apps {
+		appCache[appID] = app
+	}
+	opts.Config.mu.RUnlock()
+	
 	return &AuthMiddleware{
 		config:      opts.Config,
 		rateLimiter: NewRateLimiter(),
 		logger:      opts.Logger,
+		appCache:    appCache,
 	}
 }
 
@@ -154,13 +166,17 @@ func (m *AuthMiddleware) Authenticate(errorHandler ...ErrorHandler) gin.HandlerF
 			return
 		}
 
-		// 获取应用配置
-		app, exists := m.config.GetApp(appID)
+		// 获取应用配置（优先从缓存获取）
+		app, exists := m.appCache[appID]
 		if !exists || !app.Enabled {
-			m.logger.Error("应用不存在或已禁用", "appId", appID)
-			handler(c, http.StatusUnauthorized, "应用不存在或已禁用", "")
-			c.Abort()
-			return
+			// 缓存未命中或配置已变化，从 Config 重新读取
+			app, exists = m.config.GetApp(appID)
+			if !exists || !app.Enabled {
+				m.logger.Error("应用不存在或已禁用", "appId", appID)
+				handler(c, http.StatusUnauthorized, "应用不存在或已禁用", "")
+				c.Abort()
+				return
+			}
 		}
 
 		// 验证时间戳
@@ -195,7 +211,13 @@ func (m *AuthMiddleware) Authenticate(errorHandler ...ErrorHandler) gin.HandlerF
 		params, err := m.extractRequestParams(c, appID, timestamp, nonce, app)
 		if err != nil {
 			m.logger.Error("参数提取失败", "error", err)
-			handler(c, http.StatusBadRequest, "参数提取失败", err.Error())
+			// 检查是否是请求体读取错误（客户端错误）
+			if errors.Is(err, ErrRequestBodyInvalid) {
+				handler(c, http.StatusBadRequest, "请求体无效", err.Error())
+			} else {
+				// 其他错误视为服务器错误
+				handler(c, http.StatusInternalServerError, "参数提取失败", err.Error())
+			}
 			c.Abort()
 			return
 		}
@@ -227,7 +249,26 @@ func (m *AuthMiddleware) Authenticate(errorHandler ...ErrorHandler) gin.HandlerF
 	}
 }
 
+// RefreshAppCache 刷新应用配置缓存
+// 当动态添加或更新应用配置时调用此方法
+func (m *AuthMiddleware) RefreshAppCache() {
+	m.config.mu.RLock()
+	defer m.config.mu.RUnlock()
+	
+	newCache := make(map[string]*AppConfig, len(m.config.Apps))
+	for appID, app := range m.config.Apps {
+		newCache[appID] = app
+	}
+	m.appCache = newCache
+	m.logger.Info("应用配置缓存已刷新", "count", len(newCache))
+}
+
 // checkIPWhitelist 检查IP是否在白名单中
+// 支持以下格式：
+// - 单个IP: "192.168.1.1"
+// - CIDR: "192.168.1.0/24"
+// - 通配符: "192.168.1.*" (已废弃，建议使用CIDR)
+// - 特殊值: "localhost", "127.0.0.1", "::1"
 func (m *AuthMiddleware) checkIPWhitelist(clientIP string, whitelist []string) bool {
 	if len(whitelist) == 0 {
 		return true
@@ -236,22 +277,46 @@ func (m *AuthMiddleware) checkIPWhitelist(clientIP string, whitelist []string) b
 	// 处理本地回环地址
 	if clientIP == "" || clientIP == "::1" || strings.HasPrefix(clientIP, "127.") {
 		for _, ip := range whitelist {
-			if ip == "*" || ip == "127.0.0.1" || ip == "::1" || ip == "localhost" {
+			if ip == "127.0.0.1" || ip == "::1" || ip == "localhost" {
 				return true
 			}
 		}
+		// 如果不是特殊匹配，继续常规检查
+		clientIP = "127.0.0.1"
+	}
+
+	// 解析客户端IP
+	clientIPAddr := net.ParseIP(clientIP)
+	if clientIPAddr == nil {
+		m.logger.Error("无法解析客户端IP", "clientIP", clientIP)
 		return false
 	}
 
 	// 检查白名单
-	for _, ip := range whitelist {
-		ip = strings.TrimSpace(ip)
-		if ip == "*" || ip == clientIP {
+	for _, ipRule := range whitelist {
+		ipRule = strings.TrimSpace(ipRule)
+		
+		// 1. 检查是否是CIDR格式
+		if strings.Contains(ipRule, "/") {
+			_, ipNet, err := net.ParseCIDR(ipRule)
+			if err != nil {
+				m.logger.Error("无效的CIDR格式", "rule", ipRule, "error", err)
+				continue
+			}
+			if ipNet.Contains(clientIPAddr) {
+				return true
+			}
+			continue
+		}
+
+		// 2. 检查精确匹配
+		if ipRule == clientIP {
 			return true
 		}
-		// 简单的通配符支持
-		if strings.HasSuffix(ip, "*") {
-			prefix := strings.TrimSuffix(ip, "*")
+
+		// 3. 支持通配符（向后兼容，但建议使用CIDR）
+		if strings.HasSuffix(ipRule, "*") {
+			prefix := strings.TrimSuffix(ipRule, "*")
 			if strings.HasPrefix(clientIP, prefix) {
 				return true
 			}
@@ -275,7 +340,8 @@ func (m *AuthMiddleware) extractRequestParams(c *gin.Context, appID, timestamp, 
 		if strings.Contains(contentType, "application/json") {
 			bodyBytes, err := c.GetRawData()
 			if err != nil {
-				return nil, err
+				// 返回一个包装错误，明确标识这是客户端错误
+				return nil, fmt.Errorf("%w: %v", ErrRequestBodyInvalid, err)
 			}
 			if len(bodyBytes) > 0 {
 				c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
