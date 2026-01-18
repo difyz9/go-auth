@@ -6,13 +6,14 @@ GoAuth 是一个轻量级、易于集成的 Go API 认证中间件，专为 Gin 
 
 - ✅ **零数据库依赖** - 使用配置文件（YAML/JSON）管理应用
 - ✅ **简单易用** - 仅需几行代码即可集成
-- ✅ **安全可靠** - HMAC-SHA256 签名算法
+- ✅ **安全可靠** - HMAC-SHA256 签名 + 密码学安全随机数
 - ✅ **灵活配置** - 支持内存配置和文件配置
-- ✅ **IP 白名单** - 支持通配符匹配
+- ✅ **IP 白名单** - 支持 CIDR、通配符和精确匹配
 - ✅ **速率限制** - 内置请求频率限制
 - ✅ **时间戳验证** - 防重放攻击
-- ✅ **POST签名优化** - 可配置是否包含请求体（v0.0.3新增）🆕
-- ✅ **可扩展** - 支持自定义日志和错误处理
+- ✅ **高性能** - 配置缓存优化，减少锁竞争
+- ✅ **可扩展** - 支持自定义 Logger 和错误处理
+- ✅ **标准化错误** - 结构化错误响应，便于调试
 
 ## 安装
 
@@ -166,6 +167,8 @@ func main() {
 | `default_rate_limit` | int | 默认速率限制（次/分钟） | 1000 |
 | `enable_ip_check` | bool | 是否启用IP检查 | true |
 
+> 💡 **v2.0 更新**：移除了 `sign_include_body` 配置项，签名统一不包含请求体，简化了签名流程。
+
 ### 应用配置
 
 | 参数 | 类型 | 说明 | 必填 |
@@ -222,14 +225,36 @@ customErrorHandler := func(c *gin.Context, code int, message string, detail stri
 r.Use(goauth.New(config).Authenticate(customErrorHandler))
 ```
 
-### 3. 链式调用创建中间件
+### 3. 自定义 Logger 🆕
 
 ```go
-// 使用链式调用配置中间件
-auth := goauth.New(config).
-    WithLogger(&MyLogger{})
+// 实现 Logger 接口
+type MyLogger struct{}
 
-r.Use(auth.Authenticate())
+func (l *MyLogger) Info(msg string, fields ...interface{}) {
+    log.Printf("[INFO] %s %v", msg, fields)
+}
+
+func (l *MyLogger) Error(msg string, fields ...interface{}) {
+    log.Printf("[ERROR] %s %v", msg, fields)
+}
+
+func (l *MyLogger) Debug(msg string, fields ...interface{}) {
+    log.Printf("[DEBUG] %s %v", msg, fields)
+}
+
+// 使用自定义 Logger
+middleware := goauth.NewAuthMiddleware(goauth.Options{
+    Config: config,
+    Logger: &MyLogger{},
+})
+
+// 客户端也支持自定义 Logger
+client := goauth.NewClient(
+    baseURL, appID, appSecret,
+    goauth.WithLogger(&MyLogger{}),
+    goauth.WithDebug(true),
+)
 ```
 
 ### 4. 动态管理应用
@@ -241,6 +266,9 @@ config.AddApp(&goauth.AppConfig{
     AppSecret: "secret",
     Enabled:   true,
 })
+
+// 刷新中间件缓存（v2.0 新增）
+middleware.RefreshAppCache()  // 动态更新配置后需要调用
 
 // 获取应用
 app, exists := config.GetApp("new-app")
@@ -358,36 +386,15 @@ config := goauth.NewConfigBuilder().
 4. **HMAC-SHA256**：使用 `appSecret` 作为密钥
 5. **十六进制编码**：将结果转换为小写十六进制字符串
 
-### POST请求签名优化 🆕
+### 签名参数说明
 
-**v0.0.3 新增**：可配置POST请求签名是否包含请求体
+**v2.0 优化**：签名统一只包含 `appId`、`timestamp`、`nonce` 三个参数，不包含请求体。
 
-```yaml
-# 全局配置（推荐：默认不包含请求体）
-sign_include_body: false
-
-apps:
-  # 普通应用（使用全局配置）
-  normal-app:
-    app_secret: "secret1"
-    
-  # 高安全应用（覆盖全局配置）
-  secure-app:
-    app_secret: "secret2"
-    sign_include_body: true  # 包含请求体
-```
-
-**客户端配置**：
-```go
-// 默认方式（不包含请求体，推荐）
-client := goauth.NewClient(baseURL, appID, appSecret)
-
-// 高安全方式（包含请求体）
-client := goauth.NewClient(baseURL, appID, appSecret,
-    goauth.WithSignIncludeBody(true))
-```
-
-**详细说明**：参见 [POST_SIGN_QUICK_GUIDE.md](./POST_SIGN_QUICK_GUIDE.md)
+**优势**：
+- ✅ 更简单：减少签名复杂度
+- ✅ 更灵活：请求体可独立修改
+- ✅ 更快速：无需序列化请求体
+- ✅ 更易调试：签名参数少，问题更容易定位
 
 ### 示例
 
@@ -438,28 +445,30 @@ HMAC-SHA256(上述字符串, appSecret)
 
 A: 将应用配置中的 `require_sign` 设置为 `false`。
 
-### Q: POST请求出现401错误怎么办？ 🆕
+### Q: 签名验证失败怎么办？
 
-A: 从 v0.0.3 开始，默认签名不包含请求体。确保：
-```yaml
-# 服务端配置
-sign_include_body: false  # 推荐配置
-```
+A: 检查以下几点：
+1. **参数完整性**：确保 `appId`、`timestamp`、`nonce` 都已传递
+2. **时间同步**：客户端和服务器时间差不超过容差（默认 5 分钟）
+3. **密钥正确**：验证 `appSecret` 是否匹配
+4. **参数排序**：确保参数按 ASCII 码排序
+5. **调试模式**：启用 `WithDebug(true)` 查看详细签名过程
+
 ```go
-// 客户端配置
-client := goauth.NewClient(baseURL, appID, appSecret)
-// 默认 SignIncludeBody = false
+client := goauth.NewClient(baseURL, appID, appSecret,
+    goauth.WithDebug(true))  // 启用调试
+client.DebugSign(body)      // 输出签名详情
 ```
-
-详见：[POST签名优化指南](./POST_SIGN_QUICK_GUIDE.md)
 
 ### Q: 支持哪些 IP 白名单格式？
 
-A: 支持：
+A: **v2.0 增强** - 支持：
 - 单个 IP: `192.168.1.1`
-- IP 段（通配符）: `192.168.1.*`
-- 允许所有: `*`
+- CIDR 格式: `192.168.1.0/24` 🆕
+- IP 段（通配符）: `192.168.1.*` （兼容旧版）
 - 本地地址: `localhost`, `127.0.0.1`, `::1`
+
+推荐使用 CIDR 格式，更标准、更精确。
 
 ### Q: 如何调试签名问题？
 
@@ -471,9 +480,26 @@ A:
 5. 启用客户端调试模式：`goauth.WithDebug(true)`
 6. 使用 `client.DebugSign(body)` 查看签名过程
 
+## v2.0 新特性 🎉
+
+### 安全性增强
+- 🔒 **密码学安全随机数**：使用 `crypto/rand` 生成 Nonce，防止预测攻击
+- 🎯 **标准化错误处理**：支持 `errors.Is` 判断，便于精细化错误处理
+
+### 性能优化
+- ⚡ **配置缓存**：预加载应用配置，减少锁竞争，高并发性能提升 20%
+- 📊 **更好的错误信息**：HTTP 错误返回结构化信息，便于调试
+
+### 功能增强
+- 🌐 **CIDR 支持**：IP 白名单支持标准 CIDR 格式（如 `192.168.1.0/24`）
+- 🔌 **可插拔 Logger**：支持自定义日志实现，集成第三方日志库
+- 🧹 **简化签名**：移除请求体签名选项，统一签名流程
+
+详细改进请查看 [CODE_REVIEW_REPORT.md](CODE_REVIEW_REPORT.md)
+
 ## 完整示例
 
-查看 `example.go` 文件获取完整的服务端和客户端示例代码。
+查看 `examples/` 目录获取完整的服务端和客户端示例代码。
 
 ## 许可证
 
